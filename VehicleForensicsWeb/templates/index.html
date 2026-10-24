@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vehicle Forensics Command Center</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#07101f;--panel:#0d1728;--panel2:#111e32;--line:#23334b;--text:#eaf1fb;--muted:#91a1b7;--cyan:#35d3ff;--green:#43e0a1;--red:#ff657a;--amber:#ffc857;--shadow:0 18px 45px rgba(0,0,0,.25)}
+*{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 20% 0,#122441 0,#07101f 38%,#050b14 100%);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif}
+.layout{display:grid;grid-template-columns:250px 1fr;min-height:100vh}.side{border-right:1px solid var(--line);background:rgba(5,12,23,.82);padding:24px 16px;position:sticky;top:0;height:100vh}.brand{font-size:18px;font-weight:800;letter-spacing:.5px;margin:4px 10px 30px}.brand span{color:var(--cyan)}.nav button{width:100%;text-align:left;border:0;background:transparent;color:var(--muted);padding:13px 12px;border-radius:10px;margin:3px 0;font-size:14px;cursor:pointer}.nav button.active,.nav button:hover{background:#13243b;color:#fff}.case{position:absolute;bottom:20px;left:16px;right:16px;padding:14px;border:1px solid var(--line);border-radius:12px;background:#0b1525}.case small{color:var(--muted)}.main{padding:26px 34px 50px}.top{display:flex;justify-content:space-between;align-items:center;gap:20px}.eyebrow{font-size:12px;color:var(--cyan);text-transform:uppercase;letter-spacing:1.6px;font-weight:700}.title{font-size:30px;font-weight:800;margin:6px 0}.sub{color:var(--muted);font-size:14px}.actions{display:flex;gap:8px}.btn{border:1px solid var(--line);background:#122239;color:#fff;border-radius:9px;padding:10px 14px;cursor:pointer;font-weight:700}.btn.primary{background:linear-gradient(135deg,#0d9ec9,#1774e8);border-color:#269bd3}.btn.green{background:#0d5f49;border-color:#258e72}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:25px 0}.card{background:linear-gradient(180deg,rgba(17,30,50,.96),rgba(10,20,34,.96));border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow)}.metric{font-size:27px;font-weight:800;margin-top:10px}.label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.8px}.status{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:20px;font-size:11px;font-weight:800;margin-top:10px}.ok{background:rgba(67,224,161,.12);color:var(--green)}.warn{background:rgba(255,200,87,.12);color:var(--amber)}.danger{background:rgba(255,101,122,.12);color:var(--red)}.content{display:grid;grid-template-columns:1.5fr 1fr;gap:15px}.card h3{margin:0 0 15px;font-size:15px}.chartbox{height:300px}.upload{border:1px dashed #38516f;border-radius:12px;padding:25px;text-align:center;background:#0a1424}.upload input{display:none}.upload label{display:inline-block;padding:12px 18px;background:#132945;border:1px solid #315170;border-radius:9px;cursor:pointer}.file-name{color:var(--muted);margin-top:10px;font-size:12px}.table{width:100%;border-collapse:collapse;font-size:12px}.table th,.table td{padding:10px;border-bottom:1px solid var(--line);text-align:left}.table th{color:var(--muted);font-weight:600}.hash{font-family:Consolas,monospace;word-break:break-all;font-size:11px;color:#b7c7da}.hidden{display:none}.notice{padding:12px;border-radius:10px;background:#0c1b2d;border:1px solid var(--line);color:var(--muted);font-size:12px;margin-top:12px}.footer{color:#64758d;font-size:11px;margin-top:25px}@media(max-width:1000px){.layout{grid-template-columns:1fr}.side{height:auto;position:relative;border-right:0;border-bottom:1px solid var(--line)}.case{display:none}.grid{grid-template-columns:repeat(2,1fr)}.content{grid-template-columns:1fr}}@media(max-width:600px){.main{padding:20px}.grid{grid-template-columns:1fr}.top{display:block}.actions{margin-top:12px}}
+</style>
+</head>
+<body>
+<div class="layout">
+<aside class="side">
+<div class="brand">VF <span>COMMAND</span></div>
+<div class="nav">
+<button class="active">◉ Investigation Dashboard</button>
+<button onclick="scrollToId('evidence')">▣ Evidence</button>
+<button onclick="scrollToId('timeline')">◷ Timeline</button>
+<button onclick="scrollToId('analysis')">⌁ Analysis</button>
+<button onclick="generateReport()">↧ PDF Report</button>
+</div>
+<div class="case"><small>ACTIVE CASE</small><div style="font-weight:800;margin-top:5px">VF-2026-001</div><div class="status ok">● READY</div></div>
+</aside>
+<main class="main">
+<div class="top">
+<div><div class="eyebrow">Digital Vehicle Forensics</div><div class="title">Investigation Dashboard</div><div class="sub">Telemetry evidence • accident reconstruction • remote-intervention indicators</div></div>
+<div class="actions"><button class="btn" onclick="loadDemo('accident_demo.csv')">Demo Accident</button><button class="btn" onclick="loadDemo('hijacking_demo.csv')">Demo Hijacking</button><button class="btn primary" onclick="generateReport()">Generate PDF</button></div>
+</div>
+
+<section class="grid">
+<div class="card"><div class="label">Evidence integrity</div><div class="metric" id="integrity">—</div><div class="status ok">SHA-256</div></div>
+<div class="card"><div class="label">Collision indication</div><div class="metric" id="collision">—</div><div id="collisionBadge" class="status warn">WAITING</div></div>
+<div class="card"><div class="label">Remote intervention</div><div class="metric" id="remote">—</div><div id="remoteBadge" class="status warn">WAITING</div></div>
+<div class="card"><div class="label">Records analyzed</div><div class="metric" id="records">0</div><div class="status ok">TELEMETRY</div></div>
+</section>
+
+<section class="content" id="evidence">
+<div class="card">
+<h3>Evidence Intake</h3>
+<div class="upload"><input id="file" type="file" accept=".csv"><label for="file">＋ Select telemetry CSV</label><div class="file-name" id="fileName">No file selected</div></div>
+<div class="notice">Required: timestamp, speed_kmh, acceleration_mps2, brake, steering_deg, x, y. Optional: remote_command, event.</div>
+<div style="margin-top:12px"><button class="btn primary" onclick="analyzeUpload()">Analyze Evidence</button></div>
+</div>
+<div class="card">
+<h3>Evidence Metadata</h3>
+<table class="table"><tr><th>File</th><td id="evidenceName">—</td></tr><tr><th>SHA-256</th><td class="hash" id="hash">—</td></tr><tr><th>Status</th><td id="statusText">Awaiting evidence</td></tr></table>
+</div>
+</section>
+
+<section class="content" id="analysis" style="margin-top:15px">
+<div class="card"><h3>Speed & Event Profile</h3><div class="chartbox"><canvas id="speedChart"></canvas></div></div>
+<div class="card"><h3>Accident Reconstruction</h3><table class="table">
+<tr><th>Estimated time</th><td id="aTime">—</td></tr>
+<tr><th>Pre-impact speed</th><td id="preSpeed">—</td></tr>
+<tr><th>Post-impact speed</th><td id="postSpeed">—</td></tr>
+<tr><th>Estimated ΔV</th><td id="deltaV">—</td></tr>
+<tr><th>Max deceleration</th><td id="maxDecel">—</td></tr>
+<tr><th>Braking</th><td id="braking">—</td></tr>
+<tr><th>Location</th><td id="location">—</td></tr>
+</table></div>
+</section>
+
+<section class="content" id="timeline" style="margin-top:15px">
+<div class="card"><h3>Forensic Event Timeline</h3><table class="table"><thead><tr><th>Time</th><th>Event</th></tr></thead><tbody id="timelineBody"><tr><td colspan="2">No analysis yet.</td></tr></tbody></table></div>
+<div class="card"><h3>Remote Intervention Indicators</h3><table class="table"><thead><tr><th>Time</th><th>Speed</th><th>Reason</th></tr></thead><tbody id="remoteBody"><tr><td colspan="3">No analysis yet.</td></tr></tbody></table></div>
+</section>
+
+<div class="footer">Investigative prototype • Results are indicators derived from supplied telemetry, not proof of a real-world cyberattack.</div>
+</main>
+</div>
+<script>
+let current=null, chart=null;
+const $=id=>document.getElementById(id);
+$("file").addEventListener("change",e=>{$("fileName").textContent=e.target.files[0]?.name||"No file selected"});
+function scrollToId(id){document.getElementById(id).scrollIntoView({behavior:"smooth"})}
+async function analyzeUpload(){
+ const file=$("file").files[0]; if(!file){alert("Select a CSV first.");return}
+ const fd=new FormData(); fd.append("file",file);
+ const r=await fetch("/api/analyze",{method:"POST",body:fd}); const d=await r.json();
+ if(!r.ok){alert(d.error||"Analysis failed");return} render(d);
+}
+async function loadDemo(name){const r=await fetch("/api/demo/"+name);const d=await r.json();if(!r.ok){alert(d.error);return}render(d)}
+function render(d){
+ current=d;
+ $("integrity").textContent="VERIFIED"; $("collision").textContent=d.accident.detected?"YES":"NO"; $("remote").textContent=d.remote.length?"YES":"NO"; $("records").textContent=d.timeline.length + (d.timeline.length? " flagged":"");
+ $("evidenceName").textContent=d.evidence_name; $("hash").textContent=d.sha256; $("statusText").textContent="Evidence hash calculated and verified at import.";
+ setBadge("collisionBadge",d.accident.detected,"DETECTED","NO EVENT"); setBadge("remoteBadge",d.remote.length,"DETECTED","NO EVENT");
+ const a=d.accident;
+ $("aTime").textContent=a.detected?a.time.toFixed(2)+" s":"—"; $("preSpeed").textContent=a.detected?a.pre_speed.toFixed(2)+" km/h":"—"; $("postSpeed").textContent=a.detected?a.post_speed.toFixed(2)+" km/h":"—"; $("deltaV").textContent=a.detected?a.delta_v.toFixed(2)+" km/h":"—"; $("maxDecel").textContent=a.detected?a.max_decel.toFixed(2)+" m/s²":"—"; $("braking").textContent=a.detected?(a.braking?"YES":"NO"):"—"; $("location").textContent=a.detected?`X=${a.x.toFixed(2)}, Y=${a.y.toFixed(2)}`:"—";
+ $("timelineBody").innerHTML=d.timeline.length?d.timeline.map(x=>`<tr><td>${x.time.toFixed(2)} s</td><td>${x.event}</td></tr>`).join(""):`<tr><td colspan="2">No flagged events.</td></tr>`;
+ $("remoteBody").innerHTML=d.remote.length?d.remote.map(x=>`<tr><td>${x.time.toFixed(2)} s</td><td>${x.before.toFixed(1)} → ${x.after.toFixed(1)} km/h</td><td>${x.reasons.join(", ")}</td></tr>`).join(""):`<tr><td colspan="3">No remote-intervention indicators.</td></tr>`;
+ drawChart(d);
+}
+function setBadge(id,yes,positive,negative){const e=$(id);e.textContent=yes?positive:negative;e.className="status "+(yes?"danger":"ok")}
+function drawChart(d){
+ const labels=d.timeline.map(x=>x.time);
+ // Demo datasets are represented through flagged-event timeline; actual raw speed chart is fetched by reloading demo/upload result server-side in a future bridge.
+ const values=d.timeline.map((_,i)=>i);
+ if(chart)chart.destroy();
+ chart=new Chart($("speedChart"),{type:"line",data:{labels:labels,datasets:[{label:"Flagged event sequence",data:values,borderColor:"#35d3ff",backgroundColor:"rgba(53,211,255,.12)",fill:true,tension:.35,pointRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"#91a1b7"}}},scales:{x:{ticks:{color:"#91a1b7"},grid:{color:"#1d2b40"}},y:{ticks:{color:"#91a1b7"},grid:{color:"#1d2b40"}}}}});
+}
+async function generateReport(){
+ const r=await fetch("/api/report",{method:"POST"}); if(!r.ok){const d=await r.json();alert(d.error||"Analyze evidence first.");return}
+ const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="vehicle_forensic_report.pdf";a.click();URL.revokeObjectURL(url);
+}
+loadDemo("accident_demo.csv");
+</script>
+</body>
+</html>

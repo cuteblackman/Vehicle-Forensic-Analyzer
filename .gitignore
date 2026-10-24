@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+
+/uploads/
+/reports/
+
+VehicleForensicsWeb/uploads/
+VehicleForensicsWeb/reports/
+VehicleForensicsWeb/data/upload_*.csv

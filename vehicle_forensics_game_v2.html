@@ -1,0 +1,291 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Drive Sim - Vehicle Forensics Evidence Generator</title>
+<style>
+:root{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:#10151c;color:#e8eef5;font:12px system-ui,sans-serif;overflow:hidden}
+canvas{display:block}
+#bar{position:fixed;top:0;left:0;right:0;display:flex;flex-wrap:wrap;gap:5px;padding:calc(5px + env(safe-area-inset-top,0px)) 6px 5px;background:#000a;align-items:center;z-index:2}
+button,select{background:#1d2836;color:#e8eef5;border:1px solid #3a4a5f;border-radius:5px;padding:5px 9px;font:inherit;cursor:pointer}
+button:hover{background:#2a3a50}.hj{background:#7a1f1f;border-color:#ff5b5b;font-weight:700}.ok{background:#14532d;border-color:#4ade80}
+#ex{position:fixed;right:8px;top:80px;width:270px;background:#111a24f0;border:1px solid #3a4a5f;border-radius:8px;padding:10px;display:none;z-index:3}
+#ex button{display:block;width:100%;margin:4px 0;text-align:left}#msg{font-size:11px;color:#fbbf24;margin-top:6px}
+#set{position:fixed;left:8px;top:80px;width:240px;background:#111a24f0;border:1px solid #3a4a5f;border-radius:8px;padding:10px;display:none;z-index:3}
+#set label{display:block;margin:7px 0;color:#cbd5e1}#set input[type=range]{width:100%}#set select{width:100%;margin-top:3px}
+#tp{display:none;position:fixed;left:0;right:0;bottom:calc(8px + env(safe-area-inset-bottom,0px));justify-content:space-between;padding:0 10px;z-index:2;pointer-events:none}
+#tp .g{display:flex;gap:8px;pointer-events:auto}#tp button{width:70px;height:70px;font-size:14px;opacity:.75;touch-action:none;user-select:none}
+@media (pointer:coarse){#tp{display:flex}}
+#tt{position:fixed;top:calc(54px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);max-width:92vw;background:#7a1f1fee;border:1px solid #ff5b5b;border-radius:8px;padding:8px 12px;z-index:3;display:none;text-align:center}#tt button{margin-left:8px}
+</style></head><body>
+<div id="bar">
+<select id="sc"><option value="NORMAL">Normal Driving</option><option value="REAR">Rear-End Collision</option><option value="INTER">Intersection Collision</option><option value="HEAD">Head-On Collision</option><option value="LOC">Loss of Control</option><option value="HJ">Remote Hijack</option><option value="HJA">Remote Hijack → Accident</option><option value="HJL">Remote Hijack → Loss of Control → Collision</option></select>
+<select id="hm"><option value="OFF">OFF</option><option value="STEER" selected>STEERING HIJACK</option><option value="BRAKE">BRAKE HIJACK</option><option value="ACCEL">ACCELERATION HIJACK</option><option value="FULL">FULL CONTROL HIJACK</option></select>
+<select id="du"><option value="3">3 s</option><option value="5" selected>5 s</option><option value="8">8 s</option><option value="0">until END HIJACK</option></select>
+<button id="b_start" class="ok">START</button><button id="b_pause">PAUSE</button><button id="b_restart">RESTART</button><button id="b_reset">RESET CAR</button>
+<button id="b_hj" class="hj">REMOTE HIJACK</button><button id="b_end">END HIJACK</button><button id="b_ex">EXPORT CASE</button><button id="b_set">⚙ SETTINGS</button><button id="b_cam">📷 CAMERA (C)</button>
+</div>
+<div id="ex"><b>Evidence (SIMULATED)</b><div id="exl"></div><button id="zipb" class="ok">DOWNLOAD FULL CASE (.zip)</button><div id="msg"></div></div>
+<div id="set"><b>Settings</b>
+<label>Hijack strength <span id="v1">24</span>°<input id="s1" type="range" min="8" max="40" value="24"></label>
+<label>Steering sensitivity <span id="v2">1.0</span><input id="s2" type="range" min="50" max="160" value="100"></label>
+<label>Hijack direction<select id="s3"><option value="0">Random</option><option value="-1">Left</option><option value="1">Right</option></select></label>
+<label>Camera<select id="s4"><option value="chase">Chase (rotating)</option><option value="north">North-up</option><option value="cockpit">Cockpit (first person)</option></select></label>
+<label>Zoom<input id="s5" type="range" min="70" max="140" value="100"></label>
+<label>Traffic (restarts case)<select id="s6"><option value="0.5">Light</option><option value="1" selected>Normal</option><option value="2">Heavy</option></select></label>
+<label><input id="s7" type="checkbox" checked> Skid marks &amp; smoke</label><label><input id="s8" type="checkbox" checked> Steering assist (limits input in slides)</label></div>
+<div id="tp"><div class="g"><button data-k="KeyA">◀</button><button data-k="KeyD">▶</button></div><div class="g"><button data-k="Space">HB</button><button data-k="KeyS">BRAKE</button><button data-k="KeyW">GAS</button></div></div>
+<div id="tt"></div>
+<canvas id="c"></canvas>
+<script>
+const $=i=>document.getElementById(i),cv=$('c'),g=cv.getContext('2d');
+let W,H;const rs=()=>{W=cv.width=innerWidth;H=cv.height=innerHeight};addEventListener('resize',rs);rs();
+const WORLD=480,GR=80,RW=12,L=2.7,VID='SIM-VEH-001',D2R=Math.PI/180,PI=Math.PI;
+const pad=(n,l=2)=>String(n).padStart(l,'0'),r=(v,n=2)=>+(+v).toFixed(n),clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const iso=(d=new Date())=>{const o=-d.getTimezoneOffset(),a=Math.abs(o);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+'.'+pad(d.getMilliseconds(),3)+(o>=0?'+':'-')+pad(a/60|0)+':'+pad(a%60)};
+const CFG={hjAng:24,sens:1,dir:0,cam:'chase',zoom:1,traffic:1,fx:true,assist:true},UP=matchMedia('(pointer:coarse)').matches?90:0,cam={x:30,y:237,a:0,z:8};var skids=[];
+const mkPat=(b,sp,n)=>{const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');x.fillStyle=b;x.fillRect(0,0,64,64);for(let i=0;i<n;i++){x.fillStyle=sp[i%sp.length];x.fillRect(Math.random()*64,Math.random()*64,1.5,1.5)}const p=g.createPattern(c,'repeat');p.setTransform(new DOMMatrix().scale(.05));return p},PAS=mkPat('#3a3f47',['#434951','#30353c','#4a5058'],220),PGR=mkPat('#2f6b3a',['#367a42','#285c32','#3d8447'],200);
+const SCN={NORMAL:['Normal Driving','Cruise the city. Stay left, watch the traffic.'],REAR:['Rear-End Collision','A slow truck is ahead in your lane. Do not hit it (or do).'],INTER:['Intersection Collision','Cross traffic arrives at the centre junction (x=240).'],HEAD:['Head-On Collision','A wrong-way car is coming down your lane.'],LOC:['Loss of Control','Oil slicks ahead. Hold on.'],HJ:['Remote Hijack','Drive, then press REMOTE HIJACK (or H).'],HJA:['Remote Hijack → Accident','Full-control takeover fires at ~7 s. Parked cars on the shoulder.'],HJL:['Remote Hijack → Loss of Control → Collision','Steering takeover fires at ~8 s. Barriers on the right shoulder.']};
+let car,traf,obst,oil,tel,can,evs,tl,rem,cols,hj,lt,pend,parts,mode='idle',simT,acc,drv,eff,keys={},caseId,lastRem,prev,cruiseT,locT,offT,shake,mmT,ah,scn='NORMAL',lastEv='',cnt=0,dl=null,FILES=null;
+function resetCar(){car={x:30,y:237,h:0,v:0,st:0,ax:0,yaw:0,lat:0,dmg:0,hb:false,wrecked:false,lc:-9,colUntil:0,locUntil:0,post:false,pend:false,gear:'N',gn:0,rpm:900}}
+function init(){resetCar();tel=[];can=[];evs=[];tl=[];rem=[];cols=[];lt={};pend=[];parts=[];skids=[];simT=0;acc=0;drv={thr:0,brk:0,rev:0,st:0};eff={thr:0,brk:0,st:0};hj={on:false,sys:{},cmd:'',mode:'OFF',t0:0,dur:0,rS:0,rT:0,rB:0,ph:0};lastRem=null;prev={thr:0,brk:0,st:0};cruiseT=locT=offT=mmT=0;shake=0;lastEv='';cnt=0;caseId='SIMCASE-'+iso().slice(0,19).replace(/[-:T]/g,'');setup();mode='idle';FILES=null;$('ex').style.display='none';$('tt').style.display='none'}
+function setup(){traf=[];obst=[];oil=[];ah=null;
+ // Solid building footprints match the visible city blocks.
+ for(let i=0;i<6;i++)for(let j=0;j<6;j++){obst.push({x:i*GR+40,y:j*GR+40,hx:24,hy:24,t:'BUILDING',k:'building',c:['#8b6f5a','#6b7a8f','#9a8a6a','#7a5f6f'][(i*3+j*5)%4]});for(let n=0;n<6;n++)for(const tx of[i*GR+11,i*GR+69])obst.push({x:tx,y:j*GR+12+n*11,r:.9,t:'TREE',k:'tree'})}
+ const cone=(x,y)=>obst.push({x,y,r:.7,t:'OBSTACLE',k:'cone'}),bar=(x,y)=>obst.push({x,y,r:1.5,t:'OBSTACLE',k:'bar'}),park=(x,y)=>obst.push({x,y,r:1.8,t:'PARKED_VEHICLE',k:'park'});
+ const amb=n=>{for(let i=0;i<n;i++){const k=1+Math.floor(Math.random()*5),hz=Math.random()<.5,sg=Math.random()<.5?1:-1;let x,y,h;if(hz){if(k===3&&sg>0&&scn!=='NORMAL'&&scn!=='HJ')continue;y=k*GR+(sg>0?-3:3);x=Math.random()*WORLD;h=sg>0?0:PI}else{x=k*GR+(sg>0?3:-3);y=Math.random()*WORLD;h=sg>0?PI/2:-PI/2}
+  if(Math.hypot(x-car.x,y-car.y)<90)continue;const sv=8+Math.random()*6;traf.push({x,y,h,v:sv,vc:sv,c:'hsl('+(Math.random()*360|0)+' 60% 55%)',r:1.8,t:'TRAFFIC_VEHICLE'})}};
+ const tv=(x,y,h,v,c)=>traf.push({x,y,h,v,vc:v,nb:true,c,r:1.8,t:'TRAFFIC_VEHICLE'});
+ amb(Math.round((scn==='NORMAL'||scn==='HJ'?12:7)*CFG.traffic));cone(120,247);cone(121.5,247);
+ if(scn==='REAR')tv(220,237,0,2.5,'#f59e0b');
+ if(scn==='INTER')tv(243,105,PI/2,13.5,'#e11d48');
+ if(scn==='HEAD')tv(390,237,PI,13,'#7c3aed');
+ if(scn==='LOC'){oil.push({x:150,y:237,r:9},{x:290,y:237,r:9});cone(400,247)}
+ if(scn==='HJA'){ah={t:7,mode:'FULL',dur:8,dir:1};park(300,249.5);park(316,249.5);park(332,249.5);bar(352,248.5)}
+ if(scn==='HJL'){ah={t:8,mode:'STEER',dur:7,dir:1};for(let x=310;x<=345;x+=5)bar(x,248.5);tv(470,243,PI,11,'#0ea5e9')}
+}
+var ttT=0;function incident(k){const a=can.filter(f=>f[8]===true).length;$('tt').innerHTML='⚠ INCIDENT CAPTURED: <b>'+k+'</b> · '+tel.length+' telemetry rows · '+can.length+' CAN frames ('+a+' anomalous) · '+evs.length+' events <button id="tb">EXPORT CASE</button>';$('tt').style.display='block';$('tb').onclick=()=>{$('tt').style.display='none';if(mode==='run')pause();openEx()};clearTimeout(ttT);ttT=setTimeout(()=>$('tt').style.display='none',9000)}
+function ev(n,d='',cd=0){if(cd&&simT-(lt[n]??-99)<cd)return;lt[n]=simT;evs.push({timestamp:iso(),sim_time:r(simT,2),event:n,detail:d,x:r(car.x),y:r(car.y)});pend.push(n);lastEv=n+(d?' - '+d:'')}
+function logRem(cmd,sys,pv,cv_){rem.push({timestamp:iso(),sim_time:r(simT,2),vehicle_id:VID,remote_command:cmd,target_system:sys,previous_value:pv,commanded_value:cv_,source:'SIMULATED_REMOTE_SOURCE',anomalous:true})}
+function startHJ(m,dur,dir){if(mode!=='run'||hj.on||m==='OFF')return;dir=dir||CFG.dir||(Math.random()<.5?-1:1);
+ hj={on:true,mode:m,t0:simT,dur,sys:{},cmd:'',rS:0,rT:0,rB:0,ph:0,dir};const ps=eff.st,pt=eff.thr,pb=eff.brk;
+ if(m==='STEER'||m==='FULL'){hj.sys.st=1;hj.rS=r(dir*(m==='FULL'?CFG.hjAng*.85:CFG.hjAng),1)}
+ if(m==='ACCEL'||m==='FULL'){hj.sys.thr=1;hj.rT=1}
+ if(m==='BRAKE'){hj.sys.brk=1;hj.rB=1}
+ if(m==='FULL'){hj.sys.brk=1;hj.rB=0}
+ hj.cmd=m==='STEER'?(dir>0?'STEERING_OVERRIDE_RIGHT':'STEERING_OVERRIDE_LEFT'):m==='BRAKE'?'BRAKE_COMMAND':m==='ACCEL'?'ACCELERATION_COMMAND':'FULL_CONTROL_TAKEOVER';
+ if(hj.sys.st)logRem(hj.cmd,'STEERING',r(ps,1),hj.rS);if(hj.sys.thr)logRem(hj.cmd,'THROTTLE',r(pt),hj.rT);if(hj.sys.brk)logRem(hj.cmd,'BRAKE',r(pb),hj.rB);
+ lastRem={cmd:hj.cmd,sim:simT};ev('REMOTE_COMMAND',hj.cmd+' mode='+m);sample();incident('REMOTE HIJACK')}
+function endHJ(why){if(!hj.on)return;hj.on=false;ev('REMOTE_COMMAND','CONTROL_RETURNED_TO_DRIVER ('+why+')');sample()}
+function onRoad(x,y){const d=v=>{const m=((v%GR)+GR)%GR;return Math.min(m,GR-m)};return d(x)<=RW/2||d(y)<=RW/2}
+function spark(x,y){for(let i=0;i<26;i++)parts.push({x,y,vx:(Math.random()-.5)*16,vy:(Math.random()-.5)*16,l:.6+Math.random()*.7,c:Math.random()<.5?'#ffb020':'#bbb'})}
+function hit(o){if(simT-car.lc<2.0)return;car.lc=simT;
+ const vb=car.v*3.6,ov=o.v?[Math.cos(o.h)*o.v,Math.sin(o.h)*o.v]:[0,0],cvv=[Math.cos(car.h)*car.v,Math.sin(car.h)*car.v],rel=Math.hypot(cvv[0]-ov[0],cvv[1]-ov[1])*3.6;
+ let ang=(Math.atan2(o.y-car.y,o.x-car.x)-car.h)/D2R;ang=((ang+540)%360)-180;
+ const bs=eff.brk>.3?(hj.on&&hj.sys.brk?'REMOTE_BRAKE_COMMANDED':'DRIVER_BRAKING'):'NOT_BRAKING',pa=car.ax;
+ car.v*=.2;if(o.v)o.v*=.3;car.dmg=Math.min(100,car.dmg+Math.min(55,rel*.9));if(car.dmg>=100)car.wrecked=true;
+ car.colUntil=simT+2;car.post=false;car.pend=true;shake=1;spark(car.x,car.y);
+ cols.push({collision_timestamp:iso(),collision_sim_time:r(simT,2),collision_x:r(car.x),collision_y:r(car.y),object_type:o.t,vehicle_speed_before_kmh:r(vb,1),vehicle_speed_after_kmh:r(car.v*3.6,1),relative_speed_kmh:r(rel,1),impact_angle_deg:r(ang,0),pre_impact_acceleration_mps2:r(pa,2),braking_state:bs,remote_event_before_collision:lastRem?lastRem.cmd:null,time_between_remote_event_and_collision_s:lastRem?r(simT-lastRem.sim,2):null,remote_active_at_impact:hj.on});
+ ev('COLLISION',o.t+' rel='+r(rel,1)+'km/h');sample();incident('COLLISION ('+o.t+')')}
+function touch(o){if(simT-car.lc>=2.0)hit(o);else{car.v*=.5;if(o.v)o.v*=.6}}
+function bldgMTV(o){const c=Math.cos(car.h),sn=Math.sin(car.h),HL=2.25,HW=1.0,dx=car.x-o.x,dy=car.y-o.y;let best=1e9,nx=0,ny=0;
+ for(const [ax,ay] of [[c,sn],[-sn,c],[1,0],[0,1]]){
+  const cr=HL*Math.abs(ax*c+ay*sn)+HW*Math.abs(-ax*sn+ay*c),br=o.hx*Math.abs(ax)+o.hy*Math.abs(ay),p=dx*ax+dy*ay,ov=cr+br-Math.abs(p);
+  if(ov<=0)return null;if(ov<best){best=ov;const sg=p<0?-1:1;nx=ax*sg;ny=ay*sg}}
+ return{d:best,nx,ny}}
+function colls(){
+ const c=Math.cos(car.h),sn=Math.sin(car.h),HL=2.25,HW=1.0;
+ for(const o of obst){
+  if(o.k==='building')continue;
+  const dx=o.x-car.x,dy=o.y-car.y;if(Math.abs(dx)>8||Math.abs(dy)>8)continue;
+  const along=dx*c+dy*sn,side=-dx*sn+dy*c,qx=clamp(along,-HL,HL),qy=clamp(side,-HW,HW),dist=Math.hypot(along-qx,side-qy),rad=o.r||0;
+  if(dist<rad){const d=Math.hypot(dx,dy)||1;car.x-=dx/d*(rad-dist+.15);car.y-=dy/d*(rad-dist+.15);touch(o)}
+ }
+ for(const o of traf){
+  const dx=o.x-car.x,dy=o.y-car.y,d=Math.hypot(dx,dy)||1,limit=2.45;
+  if(d<limit){car.x-=dx/d*(limit-d+.15);car.y-=dy/d*(limit-d+.15);touch(o)}
+ }
+ if(car.x<2||car.x>WORLD-2||car.y<2||car.y>WORLD-2){
+  car.x=clamp(car.x,2,WORLD-2);car.y=clamp(car.y,2,WORLD-2);
+  touch({x:car.x,y:car.y,v:0,h:0,t:'BOUNDARY_WALL',r:1});
+ }
+ /* buildings last, so the car is always left outside them (2 passes for corners) */
+ for(let pass=0;pass<2;pass++)for(const o of obst){
+  if(o.k!=='building'||Math.abs(car.x-o.x)>32||Math.abs(car.y-o.y)>32)continue;
+  const m=bldgMTV(o);if(m){car.x+=m.nx*(m.d+.05);car.y+=m.ny*(m.d+.05);touch(o)}
+ }
+}
+let padOK=true;function getPad(){if(!padOK)return null;try{return navigator.getGamepads?[...navigator.getGamepads()].find(p=>p)||null:(padOK=false,null)}catch(e){padOK=false;return null}}
+function step(dt){simT+=dt;
+ if(ah&&!ah.done&&simT>=ah.t){ah.done=1;startHJ(ah.mode,ah.dur,ah.dir)}
+ if(hj.on){if(hj.dur&&simT-hj.t0>=hj.dur)endHJ('timeout');else if(hj.mode==='BRAKE'&&!hj.ph&&simT-hj.t0>2){hj.ph=1;hj.rB=0;hj.cmd='BRAKE_RELEASE';logRem('BRAKE_RELEASE','BRAKE',1,0);lastRem={cmd:hj.cmd,sim:simT};ev('REMOTE_COMMAND','BRAKE_RELEASE');sample()}}
+ const k=keys,gp=getPad(),gx=gp&&Math.abs(gp.axes[0])>.12?gp.axes[0]:0,gT=gp?(gp.buttons[7]?.value||0):0,gB=gp?(gp.buttons[6]?.value||0):0,up=k.KeyW||k.ArrowUp,dn=k.KeyS||k.ArrowDown,lf=k.KeyA||k.ArrowLeft,rt=k.KeyD||k.ArrowRight,sm=30*(1-.2*clamp(Math.abs(car.v)/25,0,1))*(CFG.assist&&car.lat>9?.6:1),tg=(gx||((rt?1:0)-(lf?1:0)))*sm,bIn=Math.max(gB,dn?1:0),rate=(tg?85:120)*dt;
+ drv.st+=(tg-drv.st)*(1-Math.exp(-dt*(tg?(gx?16:12):14+Math.abs(car.v)*.3)));drv.thr=Math.max(gT,up?1:0);drv.brk=bIn>0&&car.v>.3?bIn:0;drv.rev=bIn>0&&car.v<=.3?1:0;car.hb=!!k.Space||!!(gp&&gp.buttons[0]?.pressed);
+ const hs=hj.on?hj.sys:{};
+ eff.thr=hs.thr?hj.rT:drv.thr;eff.brk=hs.brk?hj.rB:drv.brk;const stT=hs.st?hj.rS:drv.st,sr=(hs.st?55:260)*dt;car.st+=clamp(stT-car.st,-sr,sr);eff.st=car.st;
+ if(hj.on&&simT-mmT>1){const m=[];if(hs.st&&Math.abs(drv.st-hj.rS)>5)m.push('STEERING driver='+r(drv.st,1)+' remote='+hj.rS);if(hs.thr&&Math.abs(drv.thr-hj.rT)>.3)m.push('THROTTLE driver='+drv.thr+' remote='+hj.rT);if(hs.brk&&Math.abs(drv.brk-hj.rB)>.3)m.push('BRAKE driver='+drv.brk+' remote='+hj.rB);if(m.length){mmT=simT;ev('DRIVER_REMOTE_INPUT_MISMATCH',m.join('; '))}}
+ let a=0,v=car.v;
+ if(car.wrecked)a=-v*3;else{if(eff.thr>0)a+=eff.thr*5.8*(1-Math.max(0,v)/32);if(drv.rev&&!hs.thr)a-=v>-6?2.8:0;if(eff.brk>0&&Math.abs(v)>.05)a-=Math.sign(v)*eff.brk*11;if(car.hb&&Math.abs(v)>.05)a-=Math.sign(v)*8;a-=.03*v+.0007*v*Math.abs(v)+(Math.abs(v)>.05?.35*Math.sign(v):0);if(CFG.assist&&!hs.st&&Math.abs(drv.st)>10&&v>12)a-=(v-12)*.8}
+ let nv=v+a*dt;if(v*nv<0&&!(eff.thr>0&&v<0)&&!drv.rev)nv=0;nv=clamp(nv,-6,30);car.ax+=((nv-v)/dt-car.ax)*.35;car.v=nv;
+ const inOil=oil.some(o=>Math.hypot(car.x-o.x,car.y-o.y)<o.r),grip=inOil?.3:1,dl_=car.st*.6*CFG.sens/(1+(car.v/16)**2)*grip;
+ let yaw=car.v/L*Math.tan(dl_*D2R);if(car.hb&&Math.abs(car.v)>3)yaw*=1.8;if(inOil)yaw+=.7*Math.sin(simT*4)*Math.min(1,car.v/15);
+ const lim=(car.hb?15:12)/Math.max(Math.abs(car.v),1);yaw=clamp(yaw,-lim,lim);if(car.wrecked)yaw=0;yaw=car.yaw+(yaw-car.yaw)*(1-Math.exp(-dt*14));car.yaw=yaw;car.lat=Math.abs(car.v*yaw);
+ car.h+=yaw*dt;if(car.h>PI)car.h-=2*PI;if(car.h<-PI)car.h+=2*PI;car.x+=Math.cos(car.h)*car.v*dt;car.y+=Math.sin(car.h)*car.v*dt;if(CFG.fx){if(car.lat>5||(car.hb&&car.v>5)||(eff.brk>.8&&car.v>12)){skids.push({x:car.x,y:car.y,h:car.h});if(skids.length>500)skids.shift()}if(skids.length&&skids[skids.length-1].x===car.x&&Math.random()<.5)parts.push({x:car.x-Math.cos(car.h)*1.4,y:car.y-Math.sin(car.h)*1.4,vx:(Math.random()-.5)*2,vy:(Math.random()-.5)*2,l:.7,c:'#ddd'});if(car.dmg>50&&Math.random()<.4)parts.push({x:car.x+Math.cos(car.h)*1.8,y:car.y+Math.sin(car.h)*1.8,vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,l:1,c:'#888'})}
+ for(const t of traf){if(!t.nb){const tc=Math.cos(t.h),ts=Math.sin(t.h);let tg=t.vc;for(const o of traf.concat([car])){if(o===t)continue;const oh=o.h,dxo=o.x-t.x,dyo=o.y-t.y;if(Math.cos(t.h-oh)<.9)continue;const f=dxo*tc+dyo*ts,lt_=-dxo*ts+dyo*tc;if(f>0&&f<18&&Math.abs(lt_)<2.4)tg=Math.min(tg,Math.max(0,(f-6.5))*1.2,Math.max(0,o.v))}t.v+=clamp(tg-t.v,-10*dt,3*dt)}else t.v+=clamp(t.vc-t.v,-10*dt,3*dt);
+ t.x+=Math.cos(t.h)*t.v*dt;t.y+=Math.sin(t.h)*t.v*dt;if(t.x<0)t.x+=WORLD;if(t.x>WORLD)t.x-=WORLD;if(t.y<0)t.y+=WORLD;if(t.y>WORLD)t.y-=WORLD}
+ colls();
+ const sp=Math.abs(car.v)*3.6,G=[0,22,42,66,92,130];let gi=1;while(gi<5&&sp>G[gi])gi++;
+ car.gear=car.v<-.3?'R':Math.abs(car.v)<.3&&eff.thr===0?'N':String(gi);car.gn=car.gear==='R'?-1:car.gear==='N'?0:gi;car.rpm=car.gear==='N'?900+eff.thr*2500:1200+clamp((sp-G[gi-1])/(G[gi]-G[gi-1]),0,1)*4300;
+ if(eff.thr>.5&&prev.thr<=.5)ev('ACCELERATION',hs.thr?'remote throttle':'driver throttle',2);
+ if(eff.brk>.3&&prev.brk<=.3&&car.v>2)ev('BRAKING',hs.brk?'remote brake':'driver brake',1.5);
+ if(eff.brk>.9&&sp>30&&car.ax<-6)ev('EMERGENCY_BRAKING','decel='+r(car.ax,1),3);
+ if(Math.abs(eff.st)>8&&Math.abs(prev.st)<=8)ev('STEERING_CHANGE','steer='+r(eff.st,1)+(hs.st?' (remote)':' (driver)'),1.5);
+ if(sp>30&&Math.abs(car.ax)<.4&&!hj.on)cruiseT+=dt;else cruiseT=0;if(cruiseT>2)ev('CRUISING','',10);
+ if((car.lat>8.5&&sp>30)||Math.abs(yaw)>.9)locT+=dt;else locT=Math.max(0,locT-dt);
+ const on=onRoad(car.x,car.y);offT=!on&&sp>30?offT+dt:0;
+ if((locT>.4||offT>1.2)&&simT-(lt.LOSS_OF_CONTROL??-99)>4){ev('LOSS_OF_CONTROL','lat_accel='+r(car.lat,1)+' yaw='+r(yaw/D2R,0)+'deg/s offroad='+!on);car.locUntil=simT+2.5}
+ if(car.pend&&simT>car.colUntil&&(Math.abs(car.v)<1||simT>car.colUntil+3)){car.pend=false;car.post=true;ev('POST_COLLISION','speed='+r(sp,1)+'km/h health='+r(100-car.dmg,0)+'%');sample()}
+ prev={thr:eff.thr,brk:eff.brk,st:eff.st};shake=Math.max(0,shake-dt*2);
+ for(const p of parts){p.x+=p.vx*dt;p.y+=p.vy*dt;p.l-=dt}parts=parts.filter(p=>p.l>0);
+ acc+=dt;while(acc>=.1){acc-=.1;sample()}}
+const carState=()=>car.wrecked?'DISABLED':car.post?'POST_COLLISION':simT<car.colUntil?'COLLISION':simT<car.locUntil?'LOSS_OF_CONTROL':hj.on?'REMOTE_CONTROLLED':'NORMAL';
+function sample(){const ts=iso(),sp=car.v*3.6,e=pend.join('|');pend=[];const hs=hj.on?hj.sys:{},hdg=((car.h/D2R)%360+360)%360;
+ tel.push([ts,r(sp,1),r(car.ax,2),r(eff.brk,2),r(eff.st,1),r(car.x,2),r(car.y,2),hj.on?hj.cmd:'',e]);
+ tl.push([ts,r(simT,2),VID,r(sp,1),r(hdg,1),r(eff.thr,2),r(eff.brk,2),r(eff.st,1),car.gear,r(car.rpm,0),carState(),r(drv.st,1),hs.st?hj.rS:'',r(drv.thr,2),hs.thr?hj.rT:'',r(drv.brk,2),hs.brk?hj.rB:'',e.includes('DRIVER_REMOTE_INPUT_MISMATCH')?1:0]);
+ const S=[['vehicle_speed',0x1A0,100,sp,0],['engine_rpm',0x1B0,1,car.rpm,0],['brake_pressure',0x2A0,100,eff.brk*100,'brk'],['steering_angle',0x2B0,100,eff.st,'st'],['throttle_position',0x1C0,100,eff.thr*100,'thr'],['wheel_speed',0x1D0,100,sp*(car.hb?.7:1),0],['yaw_rate',0x2C0,100,car.yaw/D2R,0],['gear',0x3A0,1,car.gn,0],['ignition_status',0x3B0,1,car.wrecked?0:1,0]];
+ for(const[n,id,sk,val,sys]of S){const rm=!!(sys&&hs[sys]),src=rm?'SIMULATED_REMOTE_SOURCE':sys?'DRIVER':'VEHICLE_SYSTEM',u=Math.round(val*sk)&65535;
+  can.push([ts,VID,'0x'+id.toString(16).toUpperCase(),8,[u>>8,u&255,cnt&255,0,0,0,0,0].map(b=>pad(b.toString(16)).toUpperCase()).join(' '),n,r(val,2),src,rm])}cnt++}
+/* ---------- export ---------- */
+const csv=(h,rows)=>h.join(',')+'\n'+rows.map(x=>x.map(v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}).join(',')).join('\n')+'\n';
+function summary(){const fr=rem[0],c0=fr?(cols.find(c=>c.collision_sim_time>=fr.sim_time)||null):null,c=c0||cols[0]||null;
+ const mm=evs.filter(e=>e.event==='DRIVER_REMOTE_INPUT_MISMATCH').length,anom=can.filter(f=>f[8]===true).length,frEv=evs.find(e=>e.event==='REMOTE_COMMAND'&&!/CONTROL_RETURNED/.test(e.detail));
+ const locs=evs.filter(e=>e.event==='LOSS_OF_CONTROL'&&(!fr||e.sim_time>=fr.sim_time)),after=!!(fr&&c0),rd=!!fr&&mm>0&&anom>0;
+ return{dataset_label:'SIMULATED - NOT REAL VEHICLE/CAN DATA',case_id:caseId,vehicle_id:VID,scenario:SCN[scn][0],duration_s:r(simT,1),collision_detected:cols.length>0,collision_count:cols.length,remote_intervention_detected:rd,first_remote_event:frEv?{timestamp:frEv.timestamp,detail:frEv.detail}:null,remote_command:fr?fr.remote_command:null,loss_of_control:evs.some(e=>e.event==='LOSS_OF_CONTROL'),loss_of_control_after_remote_event:locs.length>0,collision_after_remote_event:after,time_to_collision_seconds:after?r(c0.collision_sim_time-fr.sim_time,2):null,evidence:{telemetry_rows:tel.length,can_frames:can.length,remote_log_entries:rem.length,driver_remote_mismatches:mm,anomalous_can_frames:anom},collision_records:cols,verdict:rd?'SIMULATED_REMOTE_INTERVENTION_DETECTED':fr?'SIMULATED_REMOTE_INTERVENTION_INCONCLUSIVE':c?'COLLISION_NO_REMOTE_INTERVENTION_DETECTED':'NO_ANOMALY_DETECTED'}}
+async function sha(s){try{const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return[...new Uint8Array(d)].map(b=>pad(b.toString(16))).join('')}catch(e){return'UNAVAILABLE'}}
+async function build(){const F={};
+ F['telemetry.csv']=csv(['timestamp','speed_kmh','acceleration_mps2','brake','steering_deg','x','y','remote_command','event'],tel);
+ F['can_frames.csv']=csv(['timestamp','vehicle_id','can_id','dlc','data','signal_name','signal_value','source','anomalous'],can);
+ F['events.csv']=csv(['timestamp','sim_time','event','detail','x','y'],evs.map(e=>[e.timestamp,e.sim_time,e.event,e.detail,e.x,e.y]));
+ F['timeline.csv']=csv(['timestamp','simulation_time','vehicle_id','speed_kmh','heading_deg','throttle','brake','steering_deg','gear','engine_rpm','vehicle_state','driver_steering','remote_steering','driver_throttle','remote_throttle','driver_brake','remote_brake','driver_remote_mismatch'],tl);
+ F['remote_intervention_log.json']=JSON.stringify({dataset_label:'SIMULATED',vehicle_id:VID,entries:rem},null,2);
+ F['summary.json']=JSON.stringify(summary(),null,2);
+ const R='ALL DATA IN THIS CASE IS SIMULATED.\nGenerated by a game-state-driven driving simulator. It is NOT real vehicle, CAN-bus or EDR data and must not be presented as such.\nWorld coordinates x,y are metres from the top-left of the map. Left-hand traffic.\nCAN data bytes: int16 big-endian scaled value, rolling counter, zero padding.\ntimeline.csv = full 10 Hz internal state (driver vs remote inputs). events.csv = discrete events.\n';
+ const files=[];for(const[n,s]of Object.entries({...F,'README_SIMULATED.txt':R}))files.push({name:n,bytes:new TextEncoder().encode(s).length,sha256:await sha(s)});
+ F['evidence_manifest.json']=JSON.stringify({dataset_label:'SIMULATED - NOT REAL VEHICLE/CAN DATA',case_id:caseId,generated_at:iso(),generator:'Browser drive simulator (game state is source of truth)',files},null,2);
+ return{F,Z:{...F,'README_SIMULATED.txt':R}}}
+const CT=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t.push(c>>>0)}return t})();
+const crc=b=>{let c=-1;for(const x of b)c=CT[(c^x)&255]^(c>>>8);return(~c)>>>0};
+function zip(files){const E=new TextEncoder(),P=[],C=[];let off=0;const d=new Date(),tm=(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1),dd=((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate();
+ for(const[n,s]of Object.entries(files)){const nb=E.encode(n),b=E.encode(s),c=crc(b),h=new DataView(new ArrayBuffer(30));
+  h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(10,tm,true);h.setUint16(12,dd,true);h.setUint32(14,c,true);h.setUint32(18,b.length,true);h.setUint32(22,b.length,true);h.setUint16(26,nb.length,true);P.push(new Uint8Array(h.buffer),nb,b);
+  const e=new DataView(new ArrayBuffer(46));e.setUint32(0,0x02014b50,true);e.setUint16(4,20,true);e.setUint16(6,20,true);e.setUint16(8,0x0800,true);e.setUint16(12,tm,true);e.setUint16(14,dd,true);e.setUint32(16,c,true);e.setUint32(20,b.length,true);e.setUint32(24,b.length,true);e.setUint16(28,nb.length,true);e.setUint32(42,off,true);C.push(new Uint8Array(e.buffer),nb);off+=30+nb.length+b.length}
+ const n=Object.keys(files).length,z=new DataView(new ArrayBuffer(22));z.setUint32(0,0x06054b50,true);z.setUint16(8,n,true);z.setUint16(10,n,true);z.setUint32(12,C.reduce((a,x)=>a+x.length,0),true);z.setUint32(16,off,true);
+ return new Blob([...P,...C,new Uint8Array(z.buffer)],{type:'application/zip'})}
+const msg=t=>$('msg').textContent=t;
+async function save(n,data){const mt=n.endsWith('.json')?'application/json':n.endsWith('.csv')?'text/csv':n.endsWith('.zip')?'application/zip':'text/plain',b=typeof data==='string'?new Blob([data],{type:mt}):data;
+ if(!dl&&window.claude&&claude.use)try{dl=await claude.use('downloads')}catch(e){}
+ if(dl){try{await dl.save({filename:n,data:b});msg('Saved '+n);return}catch(e){if(e.code==='declined'){msg('Save cancelled.');return}}}
+ try{const u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=n;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);msg('Download started: '+n+' (check your Downloads folder).');return}catch(e){}
+ if(typeof data==='string'){try{await navigator.clipboard.writeText(data);msg('Download blocked here - '+n+' copied to clipboard. Paste it into a new file named '+n+'.');return}catch(e){}}
+ msg('Download blocked in this view. Open the game as a local HTML file in Chrome/Edge and export again.')}
+async function openEx(){const p=$('ex'),l=$('exl');p.style.display='block';l.innerHTML='';if(!tel.length){msg('No data yet - press START and drive.');return}msg('Building evidence...');const B=await build();FILES=B;
+ for(const n of Object.keys(B.F)){const b=document.createElement('button');b.textContent='⬇ '+n;b.onclick=()=>save(n,B.F[n]);l.append(b)}
+ $('zipb').onclick=()=>save('vehicle_forensics_case.zip',zip(B.Z));const sm_=summary();msg(tel.length+' telemetry rows, '+can.length+' CAN frames, '+evs.length+' events. Remote: '+(sm_.remote_intervention_detected?'YES':'NO')+', collision: '+(sm_.collision_detected?'YES':'NO')+' -> '+sm_.verdict+'. All SIMULATED.')}
+/* ---------- drawing ---------- */
+function drawCar(x,y,h,c,brk,dmg){g.save();g.translate(x,y);g.rotate(h);g.fillStyle='#0006';g.fillRect(-2.1,-.8,4.5,2);g.fillStyle=c;g.beginPath();g.roundRect(-2.25,-1,4.5,2,.5);g.fill();g.strokeStyle='#00000055';g.lineWidth=.12;g.stroke();g.fillStyle=c;g.fillRect(.7,-1.15,.4,.2);g.fillRect(.7,.95,.4,.2);g.fillStyle='#10202e';g.fillRect(.3,-.85,1,1.7);g.fillRect(-1.6,-.8,.7,1.6);g.fillStyle='#fde68a';g.fillRect(2.1,-.9,.15,.45);g.fillRect(2.1,.45,.15,.45);g.fillStyle=brk?'#ff2020':'#7f1d1d';g.fillRect(-2.25,-.9,.2,.5);g.fillRect(-2.25,.4,.2,.5);g.fillStyle='#111';for(const q of[[-1.5,-1.05],[-1.5,.85],[1.2,-1.05],[1.2,.85]])g.fillRect(q[0],q[1],.8,.2);g.fillStyle='#ffffff28';g.fillRect(-.9,-.7,1.7,1.4);if(brk){g.fillStyle='rgba(255,30,30,.35)';g.beginPath();g.arc(-2.4,0,2.2,0,2*PI);g.fill()}if(dmg>40){g.fillStyle='#0008';g.fillRect(.8,-.4,.9,.8)}g.restore()}
+function drawWorld(){g.fillStyle=PGR;g.fillRect(-300,-300,WORLD+600,WORLD+600);
+ for(let i=0;i<6;i++)for(let j=0;j<6;j++){const x=i*GR+RW/2+2,y=j*GR+RW/2+2,w=GR-RW-4;g.fillStyle='#9aa0a8';g.fillRect(x-2,y-2,w+4,w+4);g.fillStyle=(i+j)%3?'#3a7a46':'#4b8a52';g.fillRect(x,y,w,w);g.fillStyle='rgba(255,220,130,.16)';g.beginPath();g.arc(x-2,y-2,6,0,2*PI);g.fill();g.fillStyle='#ffe9a8';g.beginPath();g.arc(x-2,y-2,.5,0,2*PI);g.fill();g.fillStyle='#1f5f33';for(let n=0;n<6;n++)for(const tx of[x+3,x+w-3]){g.beginPath();g.arc(tx,y+4+n*11,2,0,2*PI);g.fill()}}
+ g.fillStyle=PAS;for(let k=0;k<=6;k++){g.fillRect(0,k*GR-RW/2,WORLD,RW);g.fillRect(k*GR-RW/2,0,RW,WORLD)}
+ g.strokeStyle='#ffffffaa';g.lineWidth=.3;g.beginPath();for(let k=0;k<=6;k++)for(const q of[-1,1]){const o=k*GR+q*(RW/2-.5);g.moveTo(0,o);g.lineTo(WORLD,o);g.moveTo(o,0);g.lineTo(o,WORLD)}g.stroke();
+ for(let i=0;i<=6;i++)for(let j=0;j<=6;j++){const cx=i*GR,cy=j*GR;g.fillStyle=PAS;g.fillRect(cx-RW/2,cy-RW/2,RW,RW);g.fillStyle='#ffffff55';for(let n=-2;n<=2;n++){g.fillRect(cx+n*2.2-.5,cy-RW/2-3,1,2.6);g.fillRect(cx+n*2.2-.5,cy+RW/2+.4,1,2.6);g.fillRect(cx-RW/2-3,cy+n*2.2-.5,2.6,1);g.fillRect(cx+RW/2+.4,cy+n*2.2-.5,2.6,1)}}
+ g.strokeStyle='#e8c84a';g.lineWidth=.25;g.setLineDash([3,3]);g.beginPath();for(let k=0;k<=6;k++){g.moveTo(0,k*GR);g.lineTo(WORLD,k*GR);g.moveTo(k*GR,0);g.lineTo(k*GR,WORLD)}g.stroke();g.setLineDash([]);
+ g.strokeStyle='#ff5b5b';g.lineWidth=1.2;g.strokeRect(0,0,WORLD,WORLD);
+ g.fillStyle='#000a';for(const s of skids){const c=Math.cos(s.h),n=Math.sin(s.h);for(const o of[-.8,.8])g.fillRect(s.x-c*1.4-n*o-.17,s.y-n*1.4+c*o-.17,.34,.34)}
+ for(const o of oil){g.fillStyle='#0d0d14dd';g.beginPath();g.arc(o.x,o.y,o.r,0,2*PI);g.fill();g.strokeStyle='#6d5bd0';g.lineWidth=.3;g.stroke()}
+ for(const o of obst){if(o.k==='tree')continue;if(o.k==='building'){g.fillStyle='#0006';g.fillRect(o.x-o.hx+2,o.y-o.hy+2,o.hx*2,o.hy*2);g.fillStyle=o.c;g.fillRect(o.x-o.hx,o.y-o.hy,o.hx*2,o.hy*2);g.fillStyle='#ffffff20';g.fillRect(o.x-o.hx+4,o.y-o.hy+4,o.hx*2-8,o.hy*2-8);g.fillStyle='#0003';g.fillRect(o.x-o.hx+8,o.y-o.hy+8,8,6);g.fillRect(o.x+o.hx-16,o.y+o.hy-14,9,7);continue}if(o.k==='park'){drawCar(o.x,o.y,0,'#64748b',0,0);continue}g.fillStyle=o.k==='cone'?'#ff7a1a':o.k==='bar'?'#d9d9d9':'#64748b';g.beginPath();g.arc(o.x,o.y,o.r,0,2*PI);g.fill();if(o.k==='bar'){g.strokeStyle='#e11d48';g.lineWidth=.3;g.stroke()}}
+ for(const t of traf)drawCar(t.x,t.y,t.h,t.c,0,0);
+ {g.save();g.translate(car.x,car.y);g.rotate(car.h);const gr=g.createLinearGradient(2.2,0,24,0);gr.addColorStop(0,'rgba(255,240,180,.3)');gr.addColorStop(1,'rgba(255,240,180,0)');g.fillStyle=gr;g.beginPath();g.moveTo(2.2,-.8);g.lineTo(24,-8);g.lineTo(24,8);g.lineTo(2.2,.8);g.fill();g.restore()}
+ drawCar(car.x,car.y,car.h,car.dmg>70?'#6b7280':'#22c1ff',eff.brk>.1||car.hb,car.dmg);
+ for(const p of parts){g.fillStyle=p.c;const sz=p.c==='#888'||p.c==='#ddd'?.9-p.l*.4:.35;g.globalAlpha=clamp(p.l,0,1)*(sz>.35?.5:1);g.fillRect(p.x-sz/2,p.y-sz/2,sz,sz)}g.globalAlpha=1}
+function txt(t,x,y,sz,c,al='left'){g.font=(sz>16?'bold ':'')+sz+'px system-ui';g.fillStyle=c;g.textAlign=al;g.fillText(t,x,y)}
+function hud(){const sp=Math.abs(car.v)*3.6,cx=100,cy=H-100-UP;if(CFG.cam!=='cockpit'){g.lineWidth=12;g.lineCap='round';g.strokeStyle='#ffffff22';g.beginPath();g.arc(cx,cy,70,.75*PI,2.25*PI);g.stroke();
+ g.strokeStyle=sp>100?'#ff5b5b':sp>70?'#fbbf24':'#3fb6ff';g.beginPath();g.arc(cx,cy,70,.75*PI,.75*PI+1.5*PI*Math.min(1,sp/130));g.stroke();
+ txt(Math.round(sp),cx,cy+10,36,'#fff','center');txt('km/h',cx,cy+28,11,'#9fb3c8','center');txt(car.gear,cx,cy-32,26,'#fbbf24','center');
+ const bx=190,by=H-80-UP;txt('RPM '+Math.round(car.rpm),bx,by-6,11,'#9fb3c8');g.fillStyle='#ffffff22';g.fillRect(bx,by,170,10);g.fillStyle=car.rpm>5200?'#ff5b5b':'#4ade80';g.fillRect(bx,by,170*clamp(car.rpm/6000,0,1),10);
+ txt('HEALTH '+Math.round(100-car.dmg)+'%',bx,by+30,11,'#9fb3c8');g.fillStyle='#ffffff22';g.fillRect(bx,by+36,170,10);g.fillStyle=car.dmg>60?'#ff5b5b':car.dmg>30?'#fbbf24':'#4ade80';g.fillRect(bx,by+36,170*(1-car.dmg/100),10);}
+ const top=66;txt(new Date().toLocaleTimeString('en-GB'),W-14,top+4,20,'#fff','right');txt(caseId,W-14,top+20,10,'#9fb3c8','right');
+ txt('MISSION: '+SCN[scn][0].toUpperCase(),W/2,top+4,14,'#fbbf24','center');txt(SCN[scn][1],W/2,top+20,11,'#cbd5e1','center');
+ g.fillStyle='#0b1220cc';g.beginPath();g.roundRect(10,top-8,230,hj.on?98:62,10);g.fill();g.strokeStyle='#ffffff22';g.lineWidth=1;g.stroke();
+ txt('REMOTE CONTROL: '+(hj.on?'ACTIVE':'INACTIVE'),18,top+10,13,hj.on?'#ff5b5b':'#4ade80');
+ const sy=hj.on?hj.sys:{};[['STEERING','st'],['THROTTLE','thr'],['BRAKE','brk']].forEach(([n,k],i)=>{g.fillStyle=sy[k]?'#c81e1e':'#ffffff18';g.fillRect(16+i*72,top+18,68,16);txt(n,50+i*72,top+30,10,'#fff','center')});
+ if(hj.on){txt(hj.cmd,18,top+52,11,'#fca5a5');txt('time left: '+(hj.dur?Math.max(0,Math.ceil(hj.dur-(simT-hj.t0)))+' s':'manual'),18,top+68,11,'#fca5a5')}
+ txt('last: '+(lastEv||'-').slice(0,40),18,top+(hj.on?88:48),10,'#9fb3c8');
+ const ms=150,mx=W-ms-12,my=H-ms-12-UP,s=ms/WORLD;g.fillStyle='#000b';g.fillRect(mx,my,ms,ms);g.strokeStyle='#667';g.lineWidth=2;g.beginPath();for(let k=0;k<=6;k++){g.moveTo(mx,my+k*GR*s);g.lineTo(mx+ms,my+k*GR*s);g.moveTo(mx+k*GR*s,my);g.lineTo(mx+k*GR*s,my+ms)}g.stroke();
+ g.fillStyle='#fbbf24';for(const t of traf)g.fillRect(mx+t.x*s-1.5,my+t.y*s-1.5,3,3);g.fillStyle='#ff7a1a';for(const o of obst){if(o.k==='building'||o.k==='tree')continue;g.fillRect(mx+o.x*s-1,my+o.y*s-1,2,2)}
+ g.save();g.translate(mx+car.x*s,my+car.y*s);g.rotate(car.h);g.fillStyle=hj.on?'#ff5b5b':'#22c1ff';g.beginPath();g.moveTo(6,0);g.lineTo(-4,-4);g.lineTo(-4,4);g.fill();g.restore();g.strokeStyle='#fff';g.lineWidth=1;g.strokeRect(mx,my,ms,ms);
+ {const wx=W/2,wy=H-52-UP;g.fillStyle='#000a';g.fillRect(wx-125,wy-16,250,32);txt('DRIVER',wx-76,wy-3,8,'#9fb3c8','right');txt('ACTUAL',wx-76,wy+9,8,'#9fb3c8','right');g.fillStyle='#ffffff22';g.fillRect(wx-70,wy-10,140,6);g.fillRect(wx-70,wy+2,140,6);
+ g.fillStyle='#3fb6ff';g.fillRect(wx+drv.st/30*70-3,wy-11,6,8);g.fillStyle=hj.on&&hj.sys.st?'#ff5b5b':'#4ade80';g.fillRect(wx+clamp(eff.st,-40,40)/30*70-3,wy+1,6,8);
+ g.fillStyle='#ffffff22';g.fillRect(wx+84,wy-12,8,24);g.fillRect(wx+96,wy-12,8,24);g.fillStyle=hj.on&&hj.sys.thr?'#ff5b5b':'#4ade80';g.fillRect(wx+84,wy+12-eff.thr*24,8,eff.thr*24);g.fillStyle=hj.on&&hj.sys.brk?'#ff5b5b':'#fbbf24';g.fillRect(wx+96,wy+12-eff.brk*24,8,eff.brk*24)}
+ txt('SIMULATED DATA - NOT REAL VEHICLE / CAN DATA',W/2,H-8,10,'#ffffff88','center');
+ if(hj.on){const p=.5+.5*Math.sin(simT*8),gr=g.createRadialGradient(W/2,H/2,Math.min(W,H)*.3,W/2,H/2,Math.max(W,H)*.7);gr.addColorStop(0,'rgba(255,40,40,0)');gr.addColorStop(1,'rgba(255,40,40,'+(.25+.2*p)+')');g.fillStyle=gr;g.fillRect(0,0,W,H);
+  g.fillStyle='rgba(255,60,60,.25)';for(let i=0;i<3;i++)g.fillRect(0,Math.random()*H,W,1.5);
+  if(simT-hj.t0<3){g.fillStyle='#7a1f1fe6';g.fillRect(W/2-190,H*.22,380,46);txt('⚠ REMOTE CONTROL DETECTED',W/2,H*.22+31,22,'#fff','center')}}
+ if(mode!=='run'){g.fillStyle='#000a';g.fillRect(W/2-230,H/2-60,460,120);txt(mode==='idle'?'PRESS START':'PAUSED',W/2,H/2-14,30,'#fff','center');txt('W/↑ accelerate · S/↓ brake/reverse · A/D steer · Space handbrake · H hijack (1-4 = mode) · C camera · P pause · R reset car',W/2,H/2+16,11,'#cbd5e1','center');txt('Recording starts at START. Evidence is exported via EXPORT CASE.',W/2,H/2+36,11,'#9fb3c8','center')}}
+function cockpit(){const FOC=Math.min(W*.8,H*1.4),hz=H*.46+clamp(car.ax,-8,8)*1.5,c=Math.cos(car.h),sn=Math.sin(car.h),ex=car.x+c*.3-sn*.45,ey=car.y+sn*.3+c*.45,EZ=1.15,N=.6;
+ g.setTransform(1,0,0,1,0,0);g.save();if(shake)g.translate((Math.random()-.5)*shake*14,(Math.random()-.5)*shake*14);
+ let q=g.createLinearGradient(0,0,0,hz);q.addColorStop(0,'#5aa9f0');q.addColorStop(1,'#d3ebff');g.fillStyle=q;g.fillRect(-20,-20,W+40,hz+20);g.fillStyle='#3a7a46';g.fillRect(-20,hz,W+40,H);
+ const poly=(P,fill,sh)=>{const Q=P.map(p=>{const dx=p[0]-ex,dy=p[1]-ey;return[dx*c+dy*sn,-dx*sn+dy*c,p[2]-EZ]}),O=[];
+  for(let i=0;i<Q.length;i++){const a=Q[i],b=Q[(i+1)%Q.length],ia=a[0]>=N,ib=b[0]>=N;if(ia)O.push(a);if(ia!==ib){const t=(N-a[0])/(b[0]-a[0]);O.push([N,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t])}}
+  if(O.length<3)return;g.beginPath();O.forEach((v,i)=>{const X=W/2+v[1]/v[0]*FOC,Y=hz-v[2]/v[0]*FOC;i?g.lineTo(X,Y):g.moveTo(X,Y)});g.closePath();g.fillStyle=fill;g.fill();if(sh){g.fillStyle='rgba(0,0,0,'+sh+')';g.fill()}};
+ const obox=(cx,cy,h,hl,hw,z0,z1,col)=>{const a=Math.cos(h),b=Math.sin(h),C=[[1,1],[1,-1],[-1,-1],[-1,1]].map(([u,v])=>[cx+a*hl*u-b*hw*v,cy+b*hl*u+a*hw*v]);
+  for(let i=0;i<4;i++){const p=C[i],w=C[(i+1)%4],mx=(p[0]+w[0])/2,my=(p[1]+w[1])/2;if((ex-mx)*(mx-cx)+(ey-my)*(my-cy)>0)poly([[p[0],p[1],z0],[w[0],w[1],z0],[w[0],w[1],z1],[p[0],p[1],z1]],col,[.25,.4,.15,.3][i])}
+  if(EZ>z1)poly(C.map(p=>[p[0],p[1],z1]),col,0)};
+ const qd=(x0,y0,x1,y1,w,col)=>{const h=y0===y1,u=h?0:w,v=h?w:0;poly([[x0-u,y0-v,.02],[x1-u,y1-v,.02],[x1+u,y1+v,.02],[x0+u,y0+v,.02]],col)};
+ for(let k=0;k<=6;k++){poly([[-30,k*GR-6,0],[510,k*GR-6,0],[510,k*GR+6,0],[-30,k*GR+6,0]],'#3a3f47');poly([[k*GR-6,-30,0],[k*GR-6,510,0],[k*GR+6,510,0],[k*GR+6,-30,0]],'#3a3f47')}
+ for(let k=0;k<=6;k++){
+  if(Math.abs(k*GR-ey)<150){for(let x=Math.floor((ex-140)/6)*6;x<ex+140;x+=6){const m=((x%GR)+GR)%GR;if(x<0||x>WORLD||m<7||m>73)continue;qd(x,k*GR,x+3,k*GR,.12,'#e8c84a')}for(let i=0;i<6;i++)for(const sd of[-5.5,5.5])qd(i*GR+7,k*GR+sd,(i+1)*GR-7,k*GR+sd,.1,'#ffffffcc')}
+  if(Math.abs(k*GR-ex)<150){for(let y=Math.floor((ey-140)/6)*6;y<ey+140;y+=6){const m=((y%GR)+GR)%GR;if(y<0||y>WORLD||m<7||m>73)continue;qd(k*GR,y,k*GR,y+3,.12,'#e8c84a')}for(let i=0;i<6;i++)for(const sd of[-5.5,5.5])qd(k*GR+sd,i*GR+7,k*GR+sd,(i+1)*GR-7,.1,'#ffffffcc')}}
+ for(const o of oil)poly([...Array(10)].map((_,i)=>[o.x+Math.cos(i*PI/5)*o.r,o.y+Math.sin(i*PI/5)*o.r,.03]),'#0d0d14');
+ obox(240,-1,0,242,1,0,1.2,'#d33');obox(240,481,0,242,1,0,1.2,'#d33');obox(-1,240,0,1,242,0,1.2,'#d33');obox(481,240,0,1,242,0,1.2,'#d33');
+ const tree=(x,y)=>{const dx=x-ex,dy=y-ey,f=dx*c+dy*sn;if(f<1)return;const X=W/2+(-dx*sn+dy*c)/f*FOC,Y0=hz+EZ/f*FOC,Y1=hz-(3-EZ)/f*FOC;g.strokeStyle='#4a3424';g.lineWidth=Math.max(1,.4/f*FOC);g.beginPath();g.moveTo(X,Y0);g.lineTo(X,Y1);g.stroke();g.fillStyle='#1f6a36';g.beginPath();g.arc(X,Y1,2.2/f*FOC,0,2*PI);g.fill()};
+ const O=[],dd=(x,y)=>(x-ex)**2+(y-ey)**2,R2=230*230;
+ for(let i=0;i<6;i++)for(let j=0;j<6;j++){const cx=i*GR+40,cy=j*GR+40,d=dd(cx,cy),hh=10+((i*7+j*3)%4)*5,col=['#8b6f5a','#6b7a8f','#9a8a6a','#7a5f6f'][(i*3+j*5)%4];
+  if(d<R2)O.push([d,()=>obox(cx,cy,0,24,24,0,hh,col)]);
+  for(let n=0;n<6;n++)for(const tx of[i*GR+11,i*GR+69]){const ty=j*GR+12+n*11,td=dd(tx,ty);if(td<8100)O.push([td,()=>tree(tx,ty)])}}
+ for(const t of traf){const d=dd(t.x,t.y);if(d<R2)O.push([d,()=>{obox(t.x,t.y,t.h,2.25,1,.25,.9,t.c);obox(t.x-Math.cos(t.h)*.2,t.y-Math.sin(t.h)*.2,t.h,1.1,.85,.9,1.45,'#0b1620')}])}
+ for(const o of obst){if(o.k==='building'||o.k==='tree')continue;const d=dd(o.x,o.y);if(d<R2)O.push([d,()=>o.k==='park'?obox(o.x,o.y,0,2.2,1,.25,1.2,'#64748b'):o.k==='bar'?obox(o.x,o.y,0,.8,.5,0,1.1,'#e5e5e5'):obox(o.x,o.y,0,.3,.3,0,.7,'#ff7a1a')])}
+ O.sort((a,b)=>b[0]-a[0]);for(const o of O)o[1]();
+ q=g.createLinearGradient(0,hz-H*.1,0,hz+H*.06);q.addColorStop(0,'rgba(211,235,255,0)');q.addColorStop(.7,'rgba(211,235,255,.75)');q.addColorStop(1,'rgba(211,235,255,0)');g.fillStyle=q;g.fillRect(0,hz-H*.1,W,H*.16);
+ /* cabin */
+ const rem=hj.on&&hj.sys.st;q=g.createLinearGradient(0,H*.7,0,H*.82);q.addColorStop(0,car.dmg>70?'#9ca3af':'#2aa8e0');q.addColorStop(1,'#0e4a68');g.fillStyle=q;g.beginPath();g.moveTo(W*.1,H*.83);g.lineTo(W*.3,H*.71);g.lineTo(W*.7,H*.71);g.lineTo(W*.9,H*.83);g.fill();
+ q=g.createLinearGradient(0,H*.78,0,H);q.addColorStop(0,'#252d39');q.addColorStop(1,'#0a0d12');g.fillStyle=q;g.beginPath();g.moveTo(-5,H*.87);g.quadraticCurveTo(W/2,H*.75,W+5,H*.87);g.lineTo(W+5,H+5);g.lineTo(-5,H+5);g.fill();
+ g.fillStyle='#0b0f14';g.beginPath();g.moveTo(-5,-5);g.lineTo(W*.09,-5);g.lineTo(W*.21,H*.8);g.lineTo(-5,H*.88);g.fill();g.beginPath();g.moveTo(W+5,-5);g.lineTo(W*.91,-5);g.lineTo(W*.79,H*.8);g.lineTo(W+5,H*.88);g.fill();g.fillRect(0,0,W,H*.05);
+ g.fillStyle='#16202b';g.beginPath();g.roundRect(W/2-75,H*.055,150,38,8);g.fill();g.fillStyle='#8fb4d6';g.beginPath();g.roundRect(W/2-70,H*.055+4,140,30,6);g.fill();g.fillStyle=eff.brk>.1?'#ff4040':'#4b6a85';g.fillRect(W/2-20,H*.055+20,40,6);
+ const dial=(x,y,rd,fr,lab,val)=>{g.fillStyle='#05080c';g.beginPath();g.arc(x,y,rd,0,2*PI);g.fill();g.lineWidth=rd*.12;g.lineCap='round';g.strokeStyle='#ffffff22';g.beginPath();g.arc(x,y,rd*.8,.75*PI,2.25*PI);g.stroke();g.strokeStyle=fr>.85?'#ff5b5b':'#3fb6ff';g.beginPath();g.arc(x,y,rd*.8,.75*PI,.75*PI+1.5*PI*clamp(fr,0,1));g.stroke();txt(val,x,y+rd*.15,rd*.45,'#fff','center');txt(lab,x,y+rd*.58,9,'#9fb3c8','center')};
+ const off=Math.min(H*.42,W*.36),rd=Math.min(H*.085,W*.1),dy=H*.9,spd=Math.abs(car.v)*3.6;
+ dial(W/2-off,dy,rd,spd/130,'km/h · '+car.gear,Math.round(spd));dial(W/2+off,dy,rd,car.rpm/6000,'RPM · HP '+Math.round(100-car.dmg),(car.rpm/1000).toFixed(1));
+ const wr=Math.min(H*.3,W*.34);g.save();g.translate(W/2,H*1.02);g.rotate(eff.st/30*2.4);
+ g.lineWidth=wr*.13;g.strokeStyle=rem?'#7f1d1d':'#161a21';g.beginPath();g.arc(0,0,wr,0,2*PI);g.stroke();g.lineWidth=wr*.04;g.strokeStyle='#ffffff20';g.beginPath();g.arc(0,0,wr*.97,PI*1.1,PI*1.9);g.stroke();
+ g.strokeStyle='#161a21';g.lineWidth=wr*.1;g.beginPath();g.moveTo(-wr,0);g.lineTo(wr,0);g.moveTo(0,0);g.lineTo(0,wr);g.stroke();g.fillStyle='#0d1117';g.beginPath();g.arc(0,0,wr*.22,0,2*PI);g.fill();
+ g.fillStyle=rem?'#ff5b5b':'#e8c84a';g.fillRect(-3,-wr-wr*.07,6,wr*.14);g.restore();g.restore();hud()}
+function draw(){if(CFG.cam==='cockpit'){cockpit();return}const sp=Math.abs(car.v),Z0=clamp(Math.min(W,H)/55,5,14)*CFG.zoom*(1-.22*sp/30);cam.z+=(Z0-cam.z)*.08;
+ cam.x+=(car.x+Math.cos(car.h)*car.v*.35-cam.x)*.15;cam.y+=(car.y+Math.sin(car.h)*car.v*.35-cam.y)*.15;
+ let da=(CFG.cam==='chase'?-car.h-PI/2:0)-cam.a;da=((da+3*PI)%(2*PI))-PI;cam.a+=da*.08;
+ g.setTransform(1,0,0,1,0,0);g.fillStyle='#10151c';g.fillRect(0,0,W,H);g.save();
+ g.translate(W/2+(shake?(Math.random()-.5)*shake*14:0),H*(CFG.cam==='chase'?.62:.5)+(shake?(Math.random()-.5)*shake*14:0));g.scale(cam.z,cam.z);g.rotate(cam.a);g.translate(-cam.x,-cam.y);drawWorld();g.restore();if(CFG.cam==='chase'&&sp>15){g.strokeStyle='rgba(255,255,255,'+((sp-15)/30*.25)+')';g.lineWidth=2;g.beginPath();for(let i=0;i<10;i++){const a=Math.random()*2*PI,r0=Math.min(W,H)*(.45+Math.random()*.2);g.moveTo(W/2+Math.cos(a)*r0,H*.62+Math.sin(a)*r0);g.lineTo(W/2+Math.cos(a)*(r0+40+sp),H*.62+Math.sin(a)*(r0+40+sp))}g.stroke()}{const vg=g.createRadialGradient(W/2,H/2,Math.min(W,H)*.45,W/2,H/2,Math.max(W,H)*.75);vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,20,.45)');g.fillStyle=vg;g.fillRect(0,0,W,H)}hud()}
+let last=performance.now();function loop(t){const dt=Math.min(.05,(t-last)/1000);last=t;if(mode==='run')step(dt);draw();requestAnimationFrame(loop)}
+/* ---------- UI ---------- */
+const pause=()=>{if(mode==='run')mode='pause';else if(mode==='pause')mode='run'};
+$('b_start').onclick=()=>{if(mode==='idle'){mode='run';ev('START','scenario='+SCN[scn][0])}else if(mode==='pause')mode='run'};
+$('b_pause').onclick=pause;$('b_restart').onclick=init;
+$('b_reset').onclick=()=>{resetCar();if(mode!=='idle')ev('VEHICLE_RESET','car respawned at start')};
+$('b_hj').onclick=()=>startHJ($('hm').value,+$('du').value);$('b_end').onclick=()=>endHJ('manual');
+$('b_ex').onclick=()=>{if($('ex').style.display==='block'){$('ex').style.display='none';return}if(mode==='run')pause();openEx()};
+$('sc').onchange=e=>{scn=e.target.value;init()};
+addEventListener('keydown',e=>{keys[e.code]=1;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();if(e.code==='KeyP')pause();if(e.code==='KeyR'){resetCar();if(mode!=='idle')ev('VEHICLE_RESET','car respawned at start')}if(e.code.length===6&&e.code.startsWith('Digit')){const m=e.code==='Digit0'?'OFF':['STEER','BRAKE','ACCEL','FULL'][+e.code[5]-1];if(m)$('hm').value=m}if(e.code==='KeyC')cyc();if(e.code==='KeyH')startHJ($('hm').value,+$('du').value)});
+addEventListener('keyup',e=>{delete keys[e.code];if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault()});document.addEventListener('click',e=>{if(e.target.closest('#bar button'))e.target.blur()});document.addEventListener('change',e=>{if(e.target.tagName==='SELECT')e.target.blur()});addEventListener('blur',()=>{keys={}});
+const cyc=()=>{const o=['chase','north','cockpit'];CFG.cam=o[(o.indexOf(CFG.cam)+1)%3];$('s4').value=CFG.cam};$('b_cam').onclick=cyc;
+const bind=(id,fn)=>{$(id).oninput=$(id).onchange=e=>fn(e.target.type==='checkbox'?e.target.checked:e.target.value)};
+bind('s1',v=>{CFG.hjAng=+v;$('v1').textContent=v});bind('s2',v=>{CFG.sens=v/100;$('v2').textContent=(v/100).toFixed(1)});bind('s3',v=>CFG.dir=+v);bind('s4',v=>CFG.cam=v);bind('s5',v=>CFG.zoom=v/100);bind('s6',v=>{CFG.traffic=+v;init()});bind('s7',v=>CFG.fx=v);bind('s8',v=>CFG.assist=v);
+$('b_set').onclick=()=>{const e=$('set');e.style.display=e.style.display==='block'?'none':'block'};
+document.querySelectorAll('#tp button').forEach(b=>{const k=b.dataset.k;b.onpointerdown=e=>{keys[k]=1;e.preventDefault()};['pointerup','pointercancel','pointerleave'].forEach(t=>b['on'+t]=()=>{delete keys[k]})});
+try{if(window.claude&&claude.use)claude.use('downloads').then(x=>dl=x).catch(()=>{})}catch(e){}
+init();requestAnimationFrame(loop);
+</script></body></html>
